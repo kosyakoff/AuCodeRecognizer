@@ -14,19 +14,19 @@ namespace Camera2Basic.Listeners
             if (file == null)
                 throw new System.ArgumentNullException("file");
 
-            owner = fragment;
-            this.file = file;
+            _owner = fragment;
+            this._file = file;
         }
 
-        private readonly File file;
-        private readonly Camera2BasicFragment owner;
+        private readonly File _file;
+        private readonly Camera2BasicFragment _owner;
 
         //public File File { get; private set; }
         //public Camera2BasicFragment Owner { get; private set; }
 
         public void OnImageAvailable(ImageReader reader)
         {
-            owner.MBackgroundHandler.Post(new ImageSaver(reader.AcquireNextImage(), file));
+            _owner.MBackgroundHandler.Post(new ImageSaver(reader.AcquireNextImage(), _file));
         }
 
         // Saves a JPEG {@link Image} into the specified {@link File}.
@@ -35,7 +35,7 @@ namespace Camera2Basic.Listeners
             // The JPEG image
             private Image mImage;
 
-            // The file we save the image into.
+            // The _file we save the image into.
             private File mFile;
 
             public ImageSaver(Image image, File file)
