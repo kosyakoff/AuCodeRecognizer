@@ -1,0 +1,264 @@
+﻿
+using System;
+using System.IO;
+using System.Linq;
+using Android.Content;
+using Android.Graphics;
+using Android.Hardware.Camera2;
+using Android.Media;
+
+namespace AndroidCamera2Demo
+{
+    // Photo Capture specific code
+    public partial class MainActivity
+    {
+        private MediaCaptorState state = MediaCaptorState.Preview;
+
+        enum MediaCaptorState
+        {
+            Preview,
+            WaitingLock,
+            WaitingPrecapture,
+            WaitingNonPrecapture,
+            PictureTaken,
+        }
+
+        private void TakePictureButton_Click(object sender, EventArgs e)
+        {
+            LockFocus();
+        }
+
+        // Lock the focus as the first step for a still image capture.
+        private void LockFocus()
+        {
+            try
+            {
+                var availableAutoFocusModes = (int[])_characteristics.Get(CameraCharacteristics.ControlAfAvailableModes);
+
+                // Set autofocus if supported
+                if (availableAutoFocusModes.Any(afMode => afMode != (int)ControlAFMode.Off))
+                {
+                    _previewRequestBuilder.Set(CaptureRequest.ControlAfTrigger, (int)ControlAFTrigger.Start);
+                    state = MediaCaptorState.WaitingLock;
+                    // Tell cameraCaptureCallback to wait for the lock.
+                    _captureSession.Capture(_previewRequestBuilder.Build(), _cameraCaptureCallback,
+                            _backgroundHandler);
+                }
+                else
+                {
+                    // If autofocus is not enabled, just capture the image
+                    CaptureStillPicture();
+                }
+            }
+            catch (CameraAccessException e)
+            {
+                e.PrintStackTrace();
+            }
+        }
+
+        private void ProcessImageCapture(CaptureResult result)
+        {
+            switch (state)
+            {
+                case MediaCaptorState.WaitingLock:
+                    {
+                        var afState = (int?)result.Get(CaptureResult.ControlAfState);
+                        if (afState == null)
+                        {
+                            CaptureStillPicture();
+                        }
+                        else if ((((int)ControlAFState.FocusedLocked) == afState.Value) ||
+                                   (((int)ControlAFState.NotFocusedLocked) == afState.Value))
+                        {
+                            // ControlAeState can be null on some devices
+                            var aeState = (int?)result.Get(CaptureResult.ControlAeState);
+                            if (aeState == null || aeState.Value == ((int)ControlAEState.Converged))
+                            {
+                                state = MediaCaptorState.PictureTaken;
+                                CaptureStillPicture();
+                            }
+                            else
+                            {
+                                RunPrecaptureSequence();
+                            }
+                        }
+                        break;
+                    }
+                case MediaCaptorState.WaitingPrecapture:
+                    {
+                        // ControlAeState can be null on some devices
+                        var aeState = (int?)result.Get(CaptureResult.ControlAeState);
+                        if (aeState == null ||
+                                aeState.Value == ((int)ControlAEState.Precapture) ||
+                                aeState.Value == ((int)ControlAEState.FlashRequired))
+                        {
+                            state = MediaCaptorState.WaitingNonPrecapture;
+                        }
+                        break;
+                    }
+                case MediaCaptorState.WaitingNonPrecapture:
+                    {
+                        // ControlAeState can be null on some devices
+                        var aeState = (int?)result.Get(CaptureResult.ControlAeState);
+                        if (aeState == null || aeState.Value != ((int)ControlAEState.Precapture))
+                        {
+                            state = MediaCaptorState.PictureTaken;
+                            CaptureStillPicture();
+                        }
+                        break;
+                    }
+            }
+        }
+
+        // Run the precapture sequence for capturing a still image. This method should be called when
+        // we get a response in captureCallback from LockFocus().
+        public void RunPrecaptureSequence()
+        {
+            try
+            {
+                // This is how to tell the camera to trigger.
+                _previewRequestBuilder.Set(CaptureRequest.ControlAePrecaptureTrigger, (int)ControlAEPrecaptureTrigger.Start);
+                // Tell captureCallback to wait for the precapture sequence to be set.
+                state = MediaCaptorState.WaitingPrecapture;
+                _captureSession.Capture(_previewRequestBuilder.Build(), _cameraCaptureCallback, _backgroundHandler);
+            }
+            catch (CameraAccessException e)
+            {
+                e.PrintStackTrace();
+            }
+        }
+
+        public void CaptureStillPicture()
+        {
+            try
+            {
+                if (null == _cameraDevice)
+                {
+                    return;
+                }
+
+                // This is the CaptureRequest.Builder that we use to take a picture.
+                var stillCaptureBuilder = _cameraDevice.CreateCaptureRequest(CameraTemplate.StillCapture);
+
+                stillCaptureBuilder.AddTarget(_imageReader.Surface);
+
+                // Use the same AE and AF modes as the preview.
+                stillCaptureBuilder.Set(CaptureRequest.ControlAfMode, (int)ControlAFMode.ContinuousPicture);
+                SetAutoFlash(stillCaptureBuilder);
+
+                // Orientation
+                int rotation = (int)WindowManager.DefaultDisplay.Rotation;
+                int orientation = GetOrientation(rotation);
+                stillCaptureBuilder.Set(CaptureRequest.JpegOrientation, orientation);
+
+                _captureSession.StopRepeating();
+                _captureSession.AbortCaptures();
+                _captureSession.Capture(stillCaptureBuilder.Build(), _cameraCaptureCallback, null);
+
+                // Play shutter sound to alert user that image was captured
+                var am = (AudioManager)GetSystemService(AudioService);
+                if (am != null && am.RingerMode == RingerMode.Normal)
+                {
+                    var cameraSound = new MediaActionSound();
+                    cameraSound.Load(MediaActionSoundType.ShutterClick);
+                    cameraSound.Play(MediaActionSoundType.ShutterClick);
+                }
+            }
+            catch (CameraAccessException e)
+            {
+                e.PrintStackTrace();
+            }
+        }
+
+        private void HandleImageCaptured(ImageReader imageReader)
+        {
+            Java.IO.FileOutputStream fos = null;
+            Java.IO.File imageFile = null;
+            var photoSaved = false;
+            try
+            {
+                var image = imageReader.AcquireLatestImage();
+                var buffer = image.GetPlanes()[0].Buffer;
+                var data = new byte[buffer.Remaining()];
+                buffer.Get(data);
+                var bitmap = BitmapFactory.DecodeByteArray(data, 0, data.Length);
+                var widthGreaterThanHeight = bitmap.Width > bitmap.Height;
+                image.Close();
+
+                string imageFileName = Guid.NewGuid().ToString();
+                var storageDir = Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryPictures);
+
+                var storageFilePath = storageDir + Java.IO.File.Separator + "AndroidCamera2Demo" + Java.IO.File.Separator + "Photos";
+                var folder = new Java.IO.File(storageFilePath);
+                if (!folder.Exists())
+                {
+                    folder.Mkdirs();
+                }
+
+                imageFile = new Java.IO.File(storageFilePath + Java.IO.File.Separator + imageFileName + ".jpg");
+                if (imageFile.Exists())
+                {
+                    imageFile.Delete();
+                }
+                if (imageFile.CreateNewFile())
+                {
+                    fos = new Java.IO.FileOutputStream(imageFile);
+                    using (var stream = new MemoryStream())
+                    {
+                        if (bitmap.Compress(Bitmap.CompressFormat.Jpeg, 100, stream))
+                        {
+                            //We set the data array to the rotated bitmap. 
+                            data = stream.ToArray();
+                            fos.Write(data);
+                        }
+                        else
+                        {
+                            //something went wrong, let's just save the bitmap without rotation.
+                            fos.Write(data);
+                        }
+                        stream.Close();
+                        photoSaved = true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // In a real application we would handle this gracefully, likely alerting the user to the error
+            }
+            finally
+            {
+                if (fos != null) fos.Close();
+                RunOnUiThread(UnlockFocus);
+            }
+
+            // Request that Android display our image if we successfully saved it
+            if (imageFile != null && photoSaved)
+            {
+                var intent = new Intent(Intent.ActionView);
+                var imageUri = Android.Net.Uri.Parse("file://" + imageFile.AbsolutePath);
+                intent.SetDataAndType(imageUri, "image/*");
+                StartActivity(intent);
+            }
+        }
+
+        void UnlockFocus()
+        {
+            try
+            {
+                // Reset the auto-focus trigger
+                _previewRequestBuilder.Set(CaptureRequest.ControlAfTrigger, (int)ControlAFTrigger.Cancel);
+                SetAutoFlash(_previewRequestBuilder);
+                _captureSession.Capture(_previewRequestBuilder.Build(), _cameraCaptureCallback,
+                        _backgroundHandler);
+                // After this, the camera will go back to the normal state of preview.
+                state = MediaCaptorState.Preview;
+                _captureSession.SetRepeatingRequest(_previewRequest, _cameraCaptureCallback,
+                        _backgroundHandler);
+            }
+            catch (CameraAccessException e)
+            {
+                e.PrintStackTrace();
+            }
+        }
+    }
+}
