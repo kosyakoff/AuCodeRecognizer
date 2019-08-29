@@ -2,6 +2,7 @@
 
 using Android.App;
 using Android.Content;
+using Android.Content.PM;
 using Android.Runtime;
 using Android.Views;
 using Android.Widget;
@@ -14,8 +15,12 @@ namespace Camera2Basic
 	{
 		protected override void OnCreate (Bundle bundle)
 		{
-			base.OnCreate (bundle);
-			ActionBar.Hide ();
+		    RequestedOrientation = ScreenOrientation.Portrait;
+
+            base.OnCreate (bundle);
+
+
+            ActionBar.Hide ();
 			SetContentView (Resource.Layout.activity_camera);
 
 			if (bundle == null) {

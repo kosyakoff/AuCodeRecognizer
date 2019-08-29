@@ -18,7 +18,7 @@ namespace Camera2Basic.Listeners
         {
             // This method is called when the camera is opened.  We start camera preview here.
             _owner.CameraOpenCloseLock.Release();
-            _owner.CameraDevice = cameraDevice;
+            _owner.CurrentCameraDevice = cameraDevice;
             _owner.CreateCameraPreviewSession();
         }
 
@@ -26,14 +26,14 @@ namespace Camera2Basic.Listeners
         {
             _owner.CameraOpenCloseLock.Release();
             cameraDevice.Close();
-            _owner.CameraDevice = null;
+            _owner.CurrentCameraDevice = null;
         }
 
         public override void OnError(CameraDevice cameraDevice, CameraError error)
         {
             _owner.CameraOpenCloseLock.Release();
             cameraDevice.Close();
-            _owner.CameraDevice = null;
+            _owner.CurrentCameraDevice = null;
             if (_owner == null)
                 return;
             Activity activity = _owner.Activity;

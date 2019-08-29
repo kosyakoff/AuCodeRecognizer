@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="1" android:versionName="1.0" package="Camera2Basic.Camera2Basic">
 	<uses-sdk android:minSdkVersion="21" />
-	<application android:label="Camera2Basic"></application>
+  <uses-feature android:name="android.hardware.screen.portrait" />
+	<application android:label="Camera2Basic">
+	  <activity android:name="CameraActivity"
+	            android:screenOrientation="portrait"
+	            android:configChanges="orientation">
+	  </activity>
+  </application>
 	<uses-permission android:name="android.permission.CAMERA" />
 </manifest>
